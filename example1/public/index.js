@@ -15,7 +15,8 @@ let device
 let rtpCapabilities
 let producerTransport
 let consumerTransports = []
-let producer
+let audioProducer
+let videoProducer
 let consumer
 let isProducer = false
 
@@ -46,13 +47,15 @@ let params = {
   }
 }
 
+let audioParams;
+let videoParams = { params };
+let consumingTransports = [];
+
 const streamSuccess = (stream) => {
   localVideo.srcObject = stream
-  const track = stream.getVideoTracks()[0]
-  params = {
-    track,
-    ...params
-  }
+
+  audioParams = { track: stream.getAudioTracks()[0], ...audioParams };
+  videoParams = { track: stream.getVideoTracks()[0], ...videoParams };
 
   joinRoom()
 }
@@ -71,7 +74,7 @@ const joinRoom = () => {
 
 const getLocalStream = () => {
   navigator.mediaDevices.getUserMedia({
-    audio: false,
+    audio: true,
     video: {
       width: {
         min: 640,
@@ -185,22 +188,40 @@ const connectSendTransport = async () => {
   // to send media to the Router
   // https://mediasoup.org/documentation/v3/mediasoup-client/api/#transport-produce
   // this action will trigger the 'connect' and 'produce' events above
-  producer = await producerTransport.produce(params)
+  
+  audioProducer = await producerTransport.produce(audioParams);
+  videoProducer = await producerTransport.produce(videoParams);
 
-  producer.on('trackended', () => {
-    console.log('track ended')
+  audioProducer.on('trackended', () => {
+    console.log('audio track ended')
+
+    // close audio track
+  })
+
+  audioProducer.on('transportclose', () => {
+    console.log('audio transport ended')
+
+    // close audio track
+  })
+  
+  videoProducer.on('trackended', () => {
+    console.log('video track ended')
 
     // close video track
   })
 
-  producer.on('transportclose', () => {
-    console.log('transport ended')
+  videoProducer.on('transportclose', () => {
+    console.log('video transport ended')
 
     // close video track
   })
 }
 
 const signalNewConsumerTransport = async (remoteProducerId) => {
+  //check if we are already consuming the remoteProducerId
+  if (consumingTransports.includes(remoteProducerId)) return;
+  consumingTransports.push(remoteProducerId);
+
   await socket.emit('createWebRtcTransport', { consumer: true }, ({ params }) => {
     // The server sends back params needed 
     // to create Send Transport on the client side
@@ -289,11 +310,18 @@ const connectRecvTransport = async (consumerTransport, remoteProducerId, serverC
     ]
 
     // create a new div element for the new consumer media
-    // and append to the video container
     const newElem = document.createElement('div')
     newElem.setAttribute('id', `td-${remoteProducerId}`)
-    newElem.setAttribute('class', 'remoteVideo')
-    newElem.innerHTML = '<video id="' + remoteProducerId + '" autoplay class="video" ></video>'
+
+    if (params.kind == 'audio') {
+      //append to the audio container
+      newElem.innerHTML = '<audio id="' + remoteProducerId + '" autoplay></audio>'
+    } else {
+      //append to the video container
+      newElem.setAttribute('class', 'remoteVideo')
+      newElem.innerHTML = '<video id="' + remoteProducerId + '" autoplay class="video" ></video>'
+    }
+
     videoContainer.appendChild(newElem)
 
     // destructure and retrieve the video track from the producer
